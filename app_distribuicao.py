@@ -102,6 +102,11 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
     if _eng is None:
         return pd.DataFrame()
 
+    # Otimização: Converte as datas para datetime para evitar a função DATE() no SQL
+    # Isso permite que o banco de dados utilize índices na coluna de data, se existirem.
+    start_datetime = datetime.combine(data_inicio, datetime.min.time())
+    end_datetime = datetime.combine(data_fim, datetime.max.time())
+
     query = text("""
         WITH PastasComAbertas AS (
             SELECT DISTINCT activity_folder
@@ -123,12 +128,12 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
             v.activity_type = 'Verificar' 
             AND (
                 v.activity_status = 'Aberta' OR
-                DATE(v.activity_date) BETWEEN :data_inicio AND :data_fim
+                v.activity_date BETWEEN :start_datetime AND :end_datetime
             )
     """)
     try:
         with _eng.connect() as conn:
-            df = pd.read_sql(query, conn, params={"data_inicio": data_inicio, "data_fim": data_fim})
+            df = pd.read_sql(query, conn, params={"start_datetime": start_datetime, "end_datetime": end_datetime})
         
         if not df.empty:
             df["activity_id"] = df["activity_id"].astype(str)
@@ -171,7 +176,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades abertas.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -186,8 +191,9 @@ def main():
     if engine is None:
         st.warning("Aplicação não conectada ao banco de dados.")
         st.stop()
-        
-    df_contexto_total = carregar_dados_contextuais(engine, data_inicio, data_fim)
+    
+    with st.spinner("Carregando dados das atividades... Por favor, aguarde."):
+        df_contexto_total = carregar_dados_contextuais(engine, data_inicio, data_fim)
 
     if df_contexto_total.empty:
         st.info("Nenhuma atividade 'Verificar' em aberto foi encontrada ou não há histórico para elas no período selecionado.")
@@ -267,7 +273,7 @@ def main():
 
     for _, atividade_aberta in df_abertas_filtrado.iterrows():
         expander_title = (
-            f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | "
+            f"ID: {atividade_aberta['activity_id']} | Pasta: {atividade_aberta['activity_folder']} | "
             f"Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
             f"Responsável Atual: {atividade_aberta['user_profile_name']}"
         )
