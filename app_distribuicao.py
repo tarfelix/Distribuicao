@@ -277,7 +277,7 @@ def main():
                 })
 
     # --- SCRIPT INJECTION ---
-    # REVISÃO 9: Solução final, estável e segura.
+    # REVISÃO 10: Solução final, estável e segura.
     # Este script espera a renderização do Streamlit terminar e aplica as cores uma única vez.
     js_script = """
     <script>
@@ -286,7 +286,7 @@ def main():
         const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
 
         if (markers.length === 0 || expanderHeaders.length === 0 || markers.length !== expanderHeaders.length) {
-            return;
+            return false; // Indica que não foi bem-sucedido
         }
 
         markers.forEach((marker, index) => {
@@ -308,44 +308,28 @@ def main():
                 header.classList.add(colorClass);
             }
         });
+        return true; // Indica que foi bem-sucedido
     }
 
-    // Função que espera a página estabilizar antes de rodar o script.
+    // A abordagem mais segura: um verificador que tenta aplicar as cores
+    // e para assim que consegue, evitando sobrecarga.
     const runWhenReady = () => {
-        let lastCount = 0;
-        let stableChecks = 0;
         const intervalId = setInterval(() => {
-            const currentCount = document.querySelectorAll('[data-testid="stExpander"]').length;
-            
-            // Se a contagem for a mesma por 3 checagens, consideramos estável.
-            if (currentCount > 0 && currentCount === lastCount) {
-                stableChecks++;
-                if (stableChecks >= 3) {
-                    clearInterval(intervalId);
-                    applyColors();
-                }
-            } else {
-                stableChecks = 0; // Reseta se a contagem mudar
+            // Tenta aplicar as cores. Se for bem-sucedido, a função retorna true.
+            if (applyColors()) {
+                // Para o verificador assim que as cores forem aplicadas.
+                clearInterval(intervalId);
             }
-            lastCount = currentCount;
+        }, 250); // Tenta a cada 250ms
 
-        }, 200); // Checa a cada 200ms
-
-        // Para o processo após 5 segundos como segurança
-        setTimeout(() => clearInterval(intervalId), 5000);
+        // Como segurança, para o verificador após 5 segundos, independentemente do resultado.
+        setTimeout(() => {
+            clearInterval(intervalId);
+        }, 5000);
     };
 
     // Roda a função principal quando o iframe do Streamlit carregar.
     window.addEventListener('load', runWhenReady);
-    
-    // Adiciona um gatilho extra para o componente de recarregar dados do Streamlit
-    // Isso garante que as cores sejam reaplicadas após um rerun.
-    const rerunButton = parent.document.querySelector('.stButton button');
-    if (rerunButton) {
-        rerunButton.addEventListener('click', () => {
-            setTimeout(runWhenReady, 500); // Espera um pouco para o rerun começar
-        });
-    }
     </script>
     """
     components.html(js_script, height=0, width=0)
