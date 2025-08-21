@@ -12,8 +12,8 @@ Funcionalidades Principais:
   Streamlit secrets.
 - Visão Focada: Lista todas as atividades com status 'Aberta'.
 - Ordenação Inteligente: Ordena as atividades por responsável e depois por pasta.
-- Destaque Visual: Usa cores para alertar sobre múltiplas atividades abertas
-  na mesma pasta.
+- Destaque Visual Preciso: Usa cores para diferenciar alertas de duplicidade
+  (mesmo responsável) e alertas de consistência (responsáveis diferentes).
 - Contexto Histórico: Para cada atividade aberta, exibe todas as outras
   atividades da mesma pasta dentro do período de tempo selecionado.
 - Filtros Inteligentes: Os filtros de responsável, pasta e texto se aplicam
@@ -143,7 +143,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades abertas.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -187,15 +187,27 @@ def main():
         df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['Texto'].str.contains(texto_busca, case=False, na=False)]
 
     # --- Lógica de Destaque e Ordenação ---
-    # Contagem de atividades abertas por pasta
-    contagem_pastas = df_abertas_filtrado['activity_folder'].value_counts()
-    df_abertas_filtrado['alerta_pasta'] = df_abertas_filtrado['activity_folder'].map(contagem_pastas) > 1
+    if not df_abertas_filtrado.empty:
+        # Contagem por pasta e responsável (para o alerta vermelho)
+        df_abertas_filtrado['contagem_resp_pasta'] = df_abertas_filtrado.groupby(['activity_folder', 'user_profile_name'])['activity_id'].transform('count')
+        
+        # Contagem de responsáveis únicos por pasta (para o alerta preto)
+        df_abertas_filtrado['unicos_resp_pasta'] = df_abertas_filtrado.groupby('activity_folder')['user_profile_name'].transform('nunique')
 
-    # Ordena por Responsável e depois por Pasta
-    df_abertas_filtrado = df_abertas_filtrado.sort_values(
-        by=['user_profile_name', 'activity_folder', 'activity_date'], 
-        ascending=[True, True, False]
-    )
+        def determinar_cor(row):
+            if row['contagem_resp_pasta'] > 1:
+                return 'red'  # Vermelho: Mesmo responsável com mais de 1 aberta na pasta
+            if row['unicos_resp_pasta'] > 1:
+                return 'black' # Preto: Pasta tem mais de 1 responsável com atividades abertas
+            return 'gray' # Normal: Apenas 1 atividade aberta na pasta com 1 responsável
+
+        df_abertas_filtrado['alerta_cor'] = df_abertas_filtrado.apply(determinar_cor, axis=1)
+
+        # Ordena por Responsável e depois por Pasta
+        df_abertas_filtrado = df_abertas_filtrado.sort_values(
+            by=['user_profile_name', 'activity_folder', 'activity_date'], 
+            ascending=[True, True, False]
+        )
 
     # --- Exibição dos Resultados ---
     st.metric("Total de Atividades 'Verificar' Abertas (após filtros)", len(df_abertas_filtrado))
@@ -207,13 +219,17 @@ def main():
             .legenda { display: flex; align-items: center; margin-bottom: 1rem; }
             .cor-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #ccc; }
             .vermelho { background-color: #ffcdd2; }
-            .preto { background-color: #f5f5f5; }
+            .preto { background-color: #BDBDBD; }
+            .cinza { background-color: #f5f5f5; }
         </style>
         <div class="legenda">
-            <div class="cor-box vermelho"></div><span><b>Alerta:</b> Mais de uma atividade 'Aberta' na mesma pasta. Risco de distribuir a mesma demanda para pessoas diferentes.</span>
+            <div class="cor-box vermelho"></div><span><b>Alerta Crítico (Vermelho):</b> A mesma pessoa tem mais de uma atividade 'Aberta' na mesma pasta. Risco de retrabalho.</span>
         </div>
         <div class="legenda">
-            <div class="cor-box preto"></div><span><b>Normal:</b> Apenas uma atividade 'Aberta' nesta pasta. Seguro para distribuir.</span>
+            <div class="cor-box preto"></div><span><b>Alerta de Consistência (Preto):</b> Pessoas diferentes têm atividades 'Abertas' na mesma pasta. Risco de decisões conflitantes.</span>
+        </div>
+        <div class="legenda">
+            <div class="cor-box cinza"></div><span><b>Normal (Cinza):</b> Apenas uma atividade 'Aberta' nesta pasta. Seguro para distribuir.</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -224,9 +240,8 @@ def main():
 
     for _, atividade_aberta in df_abertas_filtrado.iterrows():
         pasta = atividade_aberta['activity_folder']
-        cor_header = "red" if atividade_aberta['alerta_pasta'] else "black"
+        cor_header = atividade_aberta['alerta_cor']
         
-        # Título como um componente st.markdown para renderizar o HTML da cor
         title_html = (
             f"<h3 style='color: {cor_header}; margin-bottom: 0; font-size: 1.1rem; font-weight: 600;'>"
             f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | Responsável: {atividade_aberta['user_profile_name']}"
@@ -234,7 +249,6 @@ def main():
         )
         st.markdown(title_html, unsafe_allow_html=True)
 
-        # Expansor com um título mais simples
         with st.expander(f"Ver detalhes e histórico (Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')})", expanded=False):
             st.subheader("Detalhes da Atividade em Aberto")
             st.text_area(
@@ -265,7 +279,6 @@ def main():
                         "Texto": None
                     }
                 )
-        # Adiciona uma linha separadora entre os registros
         st.markdown("---")
 
 if __name__ == "__main__":
