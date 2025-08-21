@@ -37,38 +37,36 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
-# REVISÃO 2: Adotando uma abordagem mais robusta com o seletor CSS :has().
-# 1. Cada item (expander) é colocado em seu próprio st.container().
-# 2. Um 'marcador' div invisível com a classe de cor é colocado dentro do container.
-# 3. O CSS usa :has() para encontrar o container que tem o marcador e estilizar o expander dentro dele.
-#    Ex: div:has(.alert-red) -> Encontra o container que contém a classe .alert-red.
+# REVISÃO 3: Simplificando o seletor CSS para ser mais direto e robusto.
+# A lógica agora é: encontrar nosso marcador invisível e estilizar o expander
+# que está dentro do elemento irmão (o container que o Streamlit cria automaticamente).
 st.markdown("""
 <style>
-    /* --- Layout & Spacing --- */
-    /* Adiciona um espaço abaixo de cada container de atividade para separá-los. */
-    div[data-testid="stContainer"]:has(div.activity-item-marker) {
-        margin-bottom: 8px;
-    }
-
     /* O marcador em si é invisível, serve apenas para o seletor CSS. */
     .activity-item-marker {
         display: none;
     }
 
-    /* --- Color Styling for Expander Headers using :has() --- */
-    /* Seleciona o container que TEM um marcador .alert-red e estiliza o expander DENTRO dele. */
-    div[data-testid="stContainer"]:has(div.alert-red) [data-testid="stExpander"] > div:first-child {
+    /* Adiciona um espaço abaixo de cada expander para separá-los. */
+    div[data-testid="stExpander"] {
+        margin-bottom: 8px !important;
+    }
+
+    /* --- Color Styling for Expander Headers --- */
+    /* Encontra o marcador .alert-red, seleciona o div irmão (+ div),
+       e então encontra e estiliza o cabeçalho do expander dentro dele. */
+    div.alert-red + div [data-testid="stExpander"] > div:first-child {
         background-color: #ffcdd2 !important;
     }
 
-    div[data-testid="stContainer"]:has(div.alert-black) [data-testid="stExpander"] > div:first-child {
+    div.alert-black + div [data-testid="stExpander"] > div:first-child {
         background-color: #BDBDBD !important;
     }
-    div[data-testid="stContainer"]:has(div.alert-black) [data-testid="stExpander"] p {
+    div.alert-black + div [data-testid="stExpander"] p {
         color: white !important;
     }
 
-    div[data-testid="stContainer"]:has(div.alert-gray) [data-testid="stExpander"] > div:first-child {
+    div.alert-gray + div [data-testid="stExpander"] > div:first-child {
         background-color: #f5f5f5 !important;
     }
 
@@ -176,7 +174,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -267,12 +265,14 @@ def main():
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        # REVISÃO 2: A renderização agora cria um container para cada item.
-        item_container = st.container()
+        # REVISÃO 3: Simplificando a renderização. Removemos o container explícito
+        # e confiamos na estrutura padrão do Streamlit.
         
-        # Colocamos o marcador invisível e o expander dentro do mesmo container.
-        item_container.markdown(f'<div class="activity-item-marker {classe_css}"></div>', unsafe_allow_html=True)
-        with item_container.expander(expander_title, expanded=False):
+        # Colocamos o marcador invisível...
+        st.markdown(f'<div class="activity-item-marker {classe_css}"></div>', unsafe_allow_html=True)
+        
+        # ...e o expander logo em seguida.
+        with st.expander(expander_title, expanded=False):
             st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
             st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
             df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
