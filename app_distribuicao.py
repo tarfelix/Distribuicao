@@ -143,7 +143,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades abertas.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -200,7 +200,7 @@ def main():
     # --- Exibição dos Resultados ---
     st.metric("Total de Atividades 'Verificar' Abertas (após filtros)", len(df_abertas_filtrado))
     
-    # Adiciona a legenda de cores
+    # Adiciona a legenda de cores aprimorada
     st.markdown(
         """
         <style>
@@ -210,10 +210,10 @@ def main():
             .preto { background-color: #f5f5f5; }
         </style>
         <div class="legenda">
-            <div class="cor-box vermelho"></div><span><b>Alerta:</b> Mais de uma atividade 'Aberta' na mesma pasta.</span>
+            <div class="cor-box vermelho"></div><span><b>Alerta:</b> Mais de uma atividade 'Aberta' na mesma pasta. Risco de distribuir a mesma demanda para pessoas diferentes.</span>
         </div>
         <div class="legenda">
-            <div class="cor-box preto"></div><span><b>Normal:</b> Apenas uma atividade 'Aberta' na pasta.</span>
+            <div class="cor-box preto"></div><span><b>Normal:</b> Apenas uma atividade 'Aberta' nesta pasta. Seguro para distribuir.</span>
         </div>
         """,
         unsafe_allow_html=True
@@ -224,18 +224,18 @@ def main():
 
     for _, atividade_aberta in df_abertas_filtrado.iterrows():
         pasta = atividade_aberta['activity_folder']
+        cor_header = "red" if atividade_aberta['alerta_pasta'] else "black"
         
-        cor_header = "color: red;" if atividade_aberta['alerta_pasta'] else "color: black;"
-        
-        expander_title = (
-            f"<span style='{cor_header}'>"
-            f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | "
-            f"Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
-            f"Responsável Atual: {atividade_aberta['user_profile_name']}"
-            f"</span>"
+        # Título como um componente st.markdown para renderizar o HTML da cor
+        title_html = (
+            f"<h3 style='color: {cor_header}; margin-bottom: 0; font-size: 1.1rem; font-weight: 600;'>"
+            f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | Responsável: {atividade_aberta['user_profile_name']}"
+            f"</h3>"
         )
+        st.markdown(title_html, unsafe_allow_html=True)
 
-        with st.expander(expander_title, expanded=False):
+        # Expansor com um título mais simples
+        with st.expander(f"Ver detalhes e histórico (Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')})", expanded=False):
             st.subheader("Detalhes da Atividade em Aberto")
             st.text_area(
                 "Conteúdo", 
@@ -265,6 +265,8 @@ def main():
                         "Texto": None
                     }
                 )
+        # Adiciona uma linha separadora entre os registros
+        st.markdown("---")
 
 if __name__ == "__main__":
     main()
