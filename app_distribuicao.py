@@ -8,6 +8,8 @@ de atividades do tipo 'Verificar'. O objetivo principal é fornecer contexto
 histórico para cada atividade que está atualmente em aberto.
 
 Funcionalidades Principais:
+- Login de Usuário: Acesso seguro utilizando credenciais armazenadas no
+  Streamlit secrets.
 - Visão Focada: Lista todas as atividades com status 'Aberta'.
 - Contexto Histórico: Para cada atividade aberta, exibe todas as outras
   atividades (abertas, fechadas, canceladas, etc.) da mesma pasta
@@ -26,6 +28,9 @@ from sqlalchemy import create_engine, text, exc
 from sqlalchemy.engine import Engine
 from datetime import datetime, timedelta
 from typing import Optional
+
+# --- Chave de Sessão para Login ---
+USERNAME_KEY = "username_distro_app"
 
 # --- Configuração Geral da Página ---
 st.set_page_config(
@@ -107,6 +112,32 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
 
 # --- Interface Principal ---
 def main():
+    # Inicializa a chave de usuário na sessão se não existir
+    if USERNAME_KEY not in st.session_state:
+        st.session_state[USERNAME_KEY] = None
+
+    # --- Lógica de Login ---
+    if not st.session_state.get(USERNAME_KEY):
+        st.sidebar.header("🔐 Login")
+        with st.sidebar.form("login_form"):
+            username = st.text_input("Nome de Usuário")
+            password = st.text_input("Senha", type="password")
+            submitted = st.form_submit_button("Entrar")
+            if submitted:
+                # Valida as credenciais com base no st.secrets
+                creds = st.secrets.get("credentials", {})
+                user_creds = creds.get("usernames", {})
+                if username in user_creds and user_creds[username] == password:
+                    st.session_state[USERNAME_KEY] = username
+                    st.rerun()
+                else:
+                    st.sidebar.error("Usuário ou senha inválidos.")
+        
+        st.info("👋 Bem-vindo! Por favor, faça o login na barra lateral para continuar.")
+        st.stop()
+
+    # --- Interface Principal do App (Executa apenas se logado) ---
+    st.sidebar.success(f"Logado como: **{st.session_state[USERNAME_KEY]}**")
     st.sidebar.header("🔍 Filtros da Consulta")
 
     # Filtro de Data para o contexto histórico
