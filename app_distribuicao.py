@@ -10,14 +10,14 @@ histórico para cada atividade que está atualmente em aberto.
 Funcionalidades Principais:
 - Login de Usuário: Acesso seguro utilizando credenciais armazenadas no
   Streamlit secrets.
-- Visão Focada: Lista todas as atividades com status 'Aberta'.
+- Visão Focada: Lista todas as atividades com status 'Aberta' ou 'Aguardando'.
 - Ordenação Inteligente: Ordena as atividades por responsável e depois por pasta.
-- Destaque Visual Preciso: Usa cores de fundo para diferenciar alertas de
-  duplicidade (mesmo responsável) e consistência (responsáveis diferentes).
+- Destaque Visual Preciso: Usa cores de fundo e texto informativo para
+  diferenciar alertas de duplicidade e consistência.
 - Contexto Histórico: Para cada atividade aberta, exibe todas as outras
   atividades da mesma pasta dentro do período de tempo selecionado.
 - Filtros Inteligentes: Os filtros de responsável, pasta e texto se aplicam
-  apenas às atividades abertas.
+  apenas às atividades ativas.
 """
 
 import streamlit as st
@@ -36,14 +36,17 @@ st.set_page_config(
     page_title="Apoio à Distribuição de 'Verificar'"
 )
 
-# --- CSS Customizado para Cores de Fundo dos Expansores ---
+# --- CSS Customizado para Cores de Fundo e Layout Compacto ---
 st.markdown("""
 <style>
-    .st-expander {
+    .expander-wrapper {
+        margin-bottom: 8px !important; /* Controla o espaço entre os expansores */
+    }
+    .expander-wrapper .st-expander {
         border: none !important;
         box-shadow: none !important;
     }
-    .st-expander header {
+    .expander-wrapper header {
         border-radius: 5px;
         padding-left: 10px !important;
     }
@@ -71,20 +74,16 @@ st.title("Apoio à Distribuição de Atividades 'Verificar'")
 def db_engine_mysql() -> Optional[Engine]:
     """
     Cria e gerencia a conexão com o banco de dados MySQL usando SQLAlchemy.
-    As credenciais são lidas dos segredos do Streamlit.
     """
     try:
         cfg = st.secrets.get("database", {})
         db_user, db_password, db_host, db_name = cfg.get("user"), cfg.get("password"), cfg.get("host"), cfg.get("name")
-
         if not all([db_user, db_password, db_host, db_name]):
             st.error("As credenciais do banco de dados (MySQL) não foram configuradas nos segredos.")
             return None
-
         connection_url = f"mysql+mysqlconnector://{db_user}:{db_password}@{db_host}/{db_name}"
         engine = create_engine(connection_url, pool_pre_ping=True, pool_recycle=3600)
-        with engine.connect():
-            pass
+        with engine.connect(): pass
         return engine
     except exc.SQLAlchemyError as e:
         st.error(f"Ocorreu um erro ao conectar ao banco de dados (MySQL): {e}")
@@ -94,52 +93,40 @@ def db_engine_mysql() -> Optional[Engine]:
 @st.cache_data(ttl=300) # Cache de 5 minutos
 def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fim: datetime.date) -> pd.DataFrame:
     """
-    Carrega dados de forma contextual e corrigida.
-    1. Encontra todas as pastas que têm pelo menos uma atividade 'Verificar' aberta.
-    2. Busca TODAS as atividades 'Abertas' dessas pastas (independente da data).
-    3. Busca as DEMAIS atividades (histórico) dessas pastas que ocorreram no período de tempo especificado.
+    Carrega dados de forma contextual, incluindo status 'Aguardando'.
     """
-    if _eng is None:
-        return pd.DataFrame()
-
-    # Otimização: Converte as datas para datetime para evitar a função DATE() no SQL
-    # Isso permite que o banco de dados utilize índices na coluna de data, se existirem.
+    if _eng is None: return pd.DataFrame()
     start_datetime = datetime.combine(data_inicio, datetime.min.time())
     end_datetime = datetime.combine(data_fim, datetime.max.time())
+    
+    # Status considerados "ativos" para análise de conflito
+    active_statuses = ('Aberta', 'Aguardando')
 
-    query = text("""
-        WITH PastasComAbertas AS (
+    query = text(f"""
+        WITH PastasAtivas AS (
             SELECT DISTINCT activity_folder
             FROM ViewGrdAtividadesTarcisio
-            WHERE activity_type = 'Verificar' AND activity_status = 'Aberta'
+            WHERE activity_type = 'Verificar' AND activity_status IN {active_statuses}
         )
         SELECT 
-            v.activity_id, 
-            v.activity_folder, 
-            v.user_profile_name, 
-            v.activity_date, 
-            v.activity_status, 
-            v.Texto
-        FROM 
-            ViewGrdAtividadesTarcisio v
-        JOIN 
-            PastasComAbertas p ON v.activity_folder = p.activity_folder
+            v.activity_id, v.activity_folder, v.user_profile_name, 
+            v.activity_date, v.activity_status, v.Texto
+        FROM ViewGrdAtividadesTarcisio v
+        JOIN PastasAtivas p ON v.activity_folder = p.activity_folder
         WHERE 
             v.activity_type = 'Verificar' 
             AND (
-                v.activity_status = 'Aberta' OR
+                v.activity_status IN {active_statuses} OR
                 v.activity_date BETWEEN :start_datetime AND :end_datetime
             )
     """)
     try:
         with _eng.connect() as conn:
             df = pd.read_sql(query, conn, params={"start_datetime": start_datetime, "end_datetime": end_datetime})
-        
         if not df.empty:
             df["activity_id"] = df["activity_id"].astype(str)
             df["activity_date"] = pd.to_datetime(df["activity_date"], errors='coerce')
             df["Texto"] = df["Texto"].fillna("").astype(str)
-        
         return df.sort_values("activity_date", ascending=False)
     except exc.SQLAlchemyError as e:
         st.error(f"Erro ao executar a consulta no banco de dados: {e}")
@@ -164,7 +151,6 @@ def main():
                     st.rerun()
                 else:
                     st.sidebar.error("Usuário ou senha inválidos.")
-        
         st.info("👋 Bem-vindo! Por favor, faça o login na barra lateral para continuar.")
         st.stop()
 
@@ -174,7 +160,7 @@ def main():
     data_fim_padrao = datetime.now().date()
     data_inicio_padrao = data_fim_padrao - timedelta(days=10)
     
-    st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades abertas.")
+    st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
     data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
 
@@ -188,128 +174,101 @@ def main():
         st.rerun()
 
     engine = db_engine_mysql()
-    if engine is None:
-        st.warning("Aplicação não conectada ao banco de dados.")
-        st.stop()
+    if engine is None: st.stop()
     
     with st.spinner("Carregando dados das atividades... Por favor, aguarde."):
         df_contexto_total = carregar_dados_contextuais(engine, data_inicio, data_fim)
 
     if df_contexto_total.empty:
-        st.info("Nenhuma atividade 'Verificar' em aberto foi encontrada ou não há histórico para elas no período selecionado.")
+        st.info("Nenhuma atividade 'Aberta' ou 'Aguardando' foi encontrada, ou não há histórico para elas no período selecionado.")
         st.stop()
 
-    df_abertas = df_contexto_total[df_contexto_total['activity_status'] == 'Aberta'].copy()
+    active_statuses = ['Aberta', 'Aguardando']
+    df_ativas = df_contexto_total[df_contexto_total['activity_status'].isin(active_statuses)].copy()
     
     st.sidebar.markdown("---")
-    st.sidebar.header("🔎 Filtrar Atividades Abertas")
+    st.sidebar.header("🔎 Filtrar Atividades Ativas")
 
-    lista_pastas = sorted(df_abertas['activity_folder'].dropna().unique().tolist())
+    lista_pastas = sorted(df_ativas['activity_folder'].dropna().unique().tolist())
     pastas_selecionadas = st.sidebar.multiselect("📁 Pastas", options=lista_pastas)
 
-    lista_responsaveis = sorted(df_abertas['user_profile_name'].dropna().unique().tolist())
+    lista_responsaveis = sorted(df_ativas['user_profile_name'].dropna().unique().tolist())
     usuarios_selecionados = st.sidebar.multiselect("👤 Responsáveis", options=lista_responsaveis)
     
     texto_busca = st.sidebar.text_input("📝 Buscar no Texto")
 
-    df_abertas_filtrado = df_abertas
+    df_ativas_filtrado = df_ativas
     if pastas_selecionadas:
-        df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['activity_folder'].isin(pastas_selecionadas)]
+        df_ativas_filtrado = df_ativas_filtrado[df_ativas_filtrado['activity_folder'].isin(pastas_selecionadas)]
     if usuarios_selecionados:
-        df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['user_profile_name'].isin(usuarios_selecionados)]
+        df_ativas_filtrado = df_ativas_filtrado[df_ativas_filtrado['user_profile_name'].isin(usuarios_selecionados)]
     if texto_busca:
-        df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['Texto'].str.contains(texto_busca, case=False, na=False)]
+        df_ativas_filtrado = df_ativas_filtrado[df_ativas_filtrado['Texto'].str.contains(texto_busca, case=False, na=False)]
 
     # --- Lógica de Destaque e Ordenação ---
-    if not df_abertas_filtrado.empty:
-        # Contagem por pasta e responsável (para o alerta vermelho)
-        df_abertas_filtrado['contagem_resp_pasta'] = df_abertas_filtrado.groupby(['activity_folder', 'user_profile_name'])['activity_id'].transform('count')
-        
-        # Contagem de responsáveis únicos por pasta (para o alerta preto)
-        df_abertas_filtrado['unicos_resp_pasta'] = df_abertas_filtrado.groupby('activity_folder')['user_profile_name'].transform('nunique')
-
-        def determinar_classe_css(row):
-            if row['contagem_resp_pasta'] > 1:
-                return 'alert-red'
-            if row['unicos_resp_pasta'] > 1:
-                return 'alert-black'
-            return 'alert-gray'
-
-        df_abertas_filtrado['alerta_classe'] = df_abertas_filtrado.apply(determinar_classe_css, axis=1)
-
-        # Ordena por Responsável e depois por Pasta
-        df_abertas_filtrado = df_abertas_filtrado.sort_values(
+    if not df_ativas_filtrado.empty:
+        df_ativas_filtrado = df_ativas_filtrado.sort_values(
             by=['user_profile_name', 'activity_folder', 'activity_date'], 
             ascending=[True, True, False]
         )
 
-    # --- Exibição dos Resultados ---
-    st.metric("Total de Atividades 'Verificar' Abertas (após filtros)", len(df_abertas_filtrado))
+    st.metric("Total de Atividades Ativas (após filtros)", len(df_ativas_filtrado))
     
-    st.markdown(
-        """
-        <style>
-            .legenda { display: flex; align-items: center; margin-bottom: 1rem; }
-            .cor-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #ccc; }
-            .vermelho { background-color: #ffcdd2; }
-            .preto { background-color: #BDBDBD; }
-            .cinza { background-color: #f5f5f5; }
-        </style>
+    st.markdown("""
         <div class="legenda">
-            <div class="cor-box vermelho"></div><span><b>Alerta Crítico (Vermelho):</b> A mesma pessoa tem mais de uma atividade 'Aberta' na mesma pasta. Risco de retrabalho.</span>
+            <div class="cor-box vermelho"></div><span><b>Alerta Crítico (Vermelho):</b> A mesma pessoa tem mais de uma atividade ativa na mesma pasta.</span>
         </div>
         <div class="legenda">
-            <div class="cor-box preto"></div><span><b>Alerta de Consistência (Preto):</b> Pessoas diferentes têm atividades 'Abertas' na mesma pasta. Risco de decisões conflitantes.</span>
+            <div class="cor-box preto"></div><span><b>Alerta de Consistência (Preto):</b> Pessoas diferentes têm atividades ativas na mesma pasta.</span>
         </div>
         <div class="legenda">
-            <div class="cor-box cinza"></div><span><b>Normal (Cinza):</b> Apenas uma atividade 'Aberta' nesta pasta. Seguro para distribuir.</span>
+            <div class="cor-box cinza"></div><span><b>Normal (Cinza):</b> Apenas uma atividade ativa nesta pasta.</span>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+        """, unsafe_allow_html=True)
 
-    st.caption(f"Exibindo atividades abertas e seu histórico de contexto entre {data_inicio.strftime('%d/%m/%Y')} e {data_fim.strftime('%d/%m/%Y')}.")
+    st.caption(f"Exibindo atividades ativas ('Aberta' ou 'Aguardando') e seu histórico de contexto.")
     st.markdown("---")
 
-    for _, atividade_aberta in df_abertas_filtrado.iterrows():
+    for index, atividade_atual in df_ativas_filtrado.iterrows():
+        # Encontra outras atividades ativas na mesma pasta
+        conflitos_df = df_ativas_filtrado[
+            (df_ativas_filtrado['activity_folder'] == atividade_atual['activity_folder']) &
+            (df_ativas_filtrado['activity_id'] != atividade_atual['activity_id'])
+        ]
+
+        classe_css = 'alert-gray'
+        info_conflito = ""
+        
+        if not conflitos_df.empty:
+            # Verifica se há conflito com o mesmo responsável (alerta vermelho)
+            conflito_mesmo_resp = conflitos_df[conflitos_df['user_profile_name'] == atividade_atual['user_profile_name']]
+            if not conflito_mesmo_resp.empty:
+                classe_css = 'alert-red'
+                outro = conflito_mesmo_resp.iloc[0]
+                info_conflito = f" (Conflito com ID {outro['activity_id']} | Status: {outro['activity_status']})"
+            else:
+                # Se não, é conflito com responsável diferente (alerta preto)
+                classe_css = 'alert-black'
+                outro = conflitos_df.iloc[0]
+                info_conflito = f" (Conflito com ID {outro['activity_id']} | Resp: {outro['user_profile_name']})"
+
         expander_title = (
-            f"ID: {atividade_aberta['activity_id']} | Pasta: {atividade_aberta['activity_folder']} | "
-            f"Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
-            f"Responsável Atual: {atividade_aberta['user_profile_name']}"
+            f"ID: {atividade_atual['activity_id']} | Pasta: {atividade_atual['activity_folder']} | "
+            f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        # Hack para aplicar a classe CSS ao container do expander
-        st.markdown(f'<div class="{atividade_aberta["alerta_classe"]}">', unsafe_allow_html=True)
+        st.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
         with st.expander(expander_title, expanded=False):
-            st.subheader("Detalhes da Atividade em Aberto")
-            st.text_area(
-                "Conteúdo", 
-                atividade_aberta['Texto'], 
-                key=f"texto_{atividade_aberta['activity_id']}",
-                height=150,
-                disabled=True
-            )
-
-            st.subheader(f"Histórico da Pasta '{atividade_aberta['activity_folder']}' no Período")
+            st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
+            st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
             
-            df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_aberta['activity_folder']]
-            
-            if df_historico_pasta.empty:
-                st.info("Nenhum outro histórico encontrado para esta pasta no período.")
-            else:
-                st.dataframe(
-                    df_historico_pasta,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "activity_id": "ID",
-                        "activity_folder": None,
-                        "user_profile_name": "Responsável",
-                        "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
-                        "activity_status": "Status",
-                        "Texto": None
-                    }
-                )
+            df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
+            st.dataframe(df_historico_pasta, use_container_width=True, hide_index=True,
+                column_config={
+                    "activity_id": "ID", "activity_folder": None, "user_profile_name": "Responsável",
+                    "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
+                    "activity_status": "Status", "Texto": None
+                })
         st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
