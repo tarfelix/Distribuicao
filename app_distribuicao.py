@@ -277,38 +277,31 @@ def main():
                 })
 
     # --- SCRIPT INJECTION ---
-    # REVISÃO 6: Adicionando logs de depuração para o console do navegador.
-    # Isso nos ajudará a diagnosticar o problema diretamente no Streamlit Cloud.
+    # REVISÃO 7: Solução final e performática com MutationObserver e Debounce.
+    # Isso resolve o loop infinito e os problemas de sincronia.
     js_script = """
     <script>
+    // Variável para controlar o "debounce"
+    let debounceTimer;
+
     // Função para remover classes de cor antigas e evitar duplicação
     const clearOldColors = (element) => {
         element.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
     }
 
-    const applyColorsWithLogs = () => {
-        console.log("--- [DEBUG] Tentando aplicar cores... ---");
-
+    const applyColors = () => {
         const markers = document.querySelectorAll('.activity-item-marker');
         const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
 
-        console.log(`[DEBUG] Encontrados ${markers.length} marcadores e ${expanderHeaders.length} cabeçalhos de expander.`);
-
-        if (markers.length === 0 || expanderHeaders.length === 0) {
-            console.warn("[DEBUG] Nenhum marcador ou expander encontrado. O script não pode continuar.");
+        if (markers.length === 0 || expanderHeaders.length === 0 || markers.length !== expanderHeaders.length) {
+            // Se não houver elementos ou se a contagem for diferente, não faz nada.
+            // Isso evita erros durante a renderização parcial do Streamlit.
             return;
-        }
-
-        if (markers.length !== expanderHeaders.length) {
-            console.error("[DEBUG] ERRO: O número de marcadores é diferente do número de expanders. O mapeamento pode falhar.");
         }
 
         markers.forEach((marker, index) => {
             const header = expanderHeaders[index];
-            if (!header) {
-                console.warn(`[DEBUG] Não foi encontrado um cabeçalho para o marcador de índice ${index}.`);
-                return;
-            }
+            if (!header) return;
 
             clearOldColors(header);
 
@@ -325,19 +318,25 @@ def main():
                 header.classList.add(colorClass);
             }
         });
-
-        console.log("--- [DEBUG] Processo de coloração finalizado. ---");
     }
 
-    // Usamos um simples setInterval em vez de MutationObserver para maior compatibilidade.
-    // Ele tentará aplicar as cores a cada 250ms, o que deve ser suficiente para
-    // capturar os elementos após serem renderizados pelo Streamlit.
-    // A função `clearOldColors` garante que não vamos adicionar classes duplicadas.
-    setInterval(applyColorsWithLogs, 250);
+    // O MutationObserver é o "vigia" que detecta mudanças na página.
+    const observer = new MutationObserver((mutations, obs) => {
+        // Debounce: Limpa o timer anterior e inicia um novo.
+        // A função applyColors só será chamada 150ms depois da ÚLTIMA mudança detectada.
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(applyColors, 150);
+    });
 
-    // Roda uma vez no carregamento inicial também
+    // Começa a observar o corpo do documento por mudanças na estrutura (novos elementos, etc.)
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Roda uma vez no carregamento inicial, após um pequeno delay
     window.addEventListener('load', () => {
-        setTimeout(applyColorsWithLogs, 500); // Um delay maior no carregamento inicial
+        setTimeout(applyColors, 200);
     });
     </script>
     """
