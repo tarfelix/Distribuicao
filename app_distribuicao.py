@@ -39,30 +39,39 @@ st.set_page_config(
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
 st.markdown("""
 <style>
-    .expander-wrapper {
-        margin-bottom: 8px !important; /* Controla o espaço entre os expansores */
+    /* Controla o espaço entre os expansores */
+    .st-emotion-cache-1gulkj5 {
+        gap: 0.5rem !important;
     }
     .expander-wrapper .st-expander {
         border: none !important;
         box-shadow: none !important;
+        margin-bottom: 8px; /* Espaço entre cada item */
     }
-    .expander-wrapper header {
+    .expander-wrapper .st-expander header {
         border-radius: 5px;
-        padding-left: 10px !important;
+        padding: 0.5rem 0.75rem !important;
     }
-    .alert-red header {
+    /* Cores de fundo para os alertas */
+    .alert-red .st-expander header {
         background-color: #ffcdd2 !important;
     }
-    .alert-black header {
+    .alert-black .st-expander header {
         background-color: #BDBDBD !important;
         color: white !important;
     }
-    .alert-black header p {
+    .alert-black .st-expander header p {
         color: white !important;
     }
-    .alert-gray header {
+    .alert-gray .st-expander header {
         background-color: #f5f5f5 !important;
     }
+    /* Estilos da legenda */
+    .legenda { display: flex; align-items: center; margin-bottom: 1rem; }
+    .cor-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #ccc; }
+    .vermelho { background-color: #ffcdd2; }
+    .preto { background-color: #BDBDBD; }
+    .cinza { background-color: #f5f5f5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,7 +108,6 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
     start_datetime = datetime.combine(data_inicio, datetime.min.time())
     end_datetime = datetime.combine(data_fim, datetime.max.time())
     
-    # Status considerados "ativos" para análise de conflito
     active_statuses = ('Aberta', 'Aguardando')
 
     query = text(f"""
@@ -162,7 +170,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -205,7 +213,6 @@ def main():
     if texto_busca:
         df_ativas_filtrado = df_ativas_filtrado[df_ativas_filtrado['Texto'].str.contains(texto_busca, case=False, na=False)]
 
-    # --- Lógica de Destaque e Ordenação ---
     if not df_ativas_filtrado.empty:
         df_ativas_filtrado = df_ativas_filtrado.sort_values(
             by=['user_profile_name', 'activity_folder', 'activity_date'], 
@@ -229,25 +236,22 @@ def main():
     st.caption(f"Exibindo atividades ativas ('Aberta' ou 'Aguardando') e seu histórico de contexto.")
     st.markdown("---")
 
-    for index, atividade_atual in df_ativas_filtrado.iterrows():
-        # Encontra outras atividades ativas na mesma pasta
-        conflitos_df = df_ativas_filtrado[
-            (df_ativas_filtrado['activity_folder'] == atividade_atual['activity_folder']) &
-            (df_ativas_filtrado['activity_id'] != atividade_atual['activity_id'])
+    for _, atividade_atual in df_ativas_filtrado.iterrows():
+        conflitos_df = df_ativas[
+            (df_ativas['activity_folder'] == atividade_atual['activity_folder']) &
+            (df_ativas['activity_id'] != atividade_atual['activity_id'])
         ]
 
         classe_css = 'alert-gray'
         info_conflito = ""
         
         if not conflitos_df.empty:
-            # Verifica se há conflito com o mesmo responsável (alerta vermelho)
             conflito_mesmo_resp = conflitos_df[conflitos_df['user_profile_name'] == atividade_atual['user_profile_name']]
             if not conflito_mesmo_resp.empty:
                 classe_css = 'alert-red'
                 outro = conflito_mesmo_resp.iloc[0]
                 info_conflito = f" (Conflito com ID {outro['activity_id']} | Status: {outro['activity_status']})"
             else:
-                # Se não, é conflito com responsável diferente (alerta preto)
                 classe_css = 'alert-black'
                 outro = conflitos_df.iloc[0]
                 info_conflito = f" (Conflito com ID {outro['activity_id']} | Resp: {outro['user_profile_name']})"
@@ -257,19 +261,20 @@ def main():
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        st.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
-        with st.expander(expander_title, expanded=False):
-            st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
-            st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
-            
-            df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
-            st.dataframe(df_historico_pasta, use_container_width=True, hide_index=True,
-                column_config={
-                    "activity_id": "ID", "activity_folder": None, "user_profile_name": "Responsável",
-                    "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
-                    "activity_status": "Status", "Texto": None
-                })
-        st.markdown('</div>', unsafe_allow_html=True)
+        container = st.container()
+        container.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
+        with container:
+            with st.expander(expander_title, expanded=False):
+                st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
+                st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
+                df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
+                st.dataframe(df_historico_pasta, use_container_width=True, hide_index=True,
+                    column_config={
+                        "activity_id": "ID", "activity_folder": None, "user_profile_name": "Responsável",
+                        "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
+                        "activity_status": "Status", "Texto": None
+                    })
+        container.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
