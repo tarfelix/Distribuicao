@@ -277,25 +277,15 @@ def main():
                 })
 
     # --- SCRIPT INJECTION ---
-    # REVISÃO 7: Solução final e performática com MutationObserver e Debounce.
-    # Isso resolve o loop infinito e os problemas de sincronia.
+    # REVISÃO 8: Solução estável e leve, removendo o MutationObserver que causava instabilidade.
+    # O script agora roda apenas uma vez após a página carregar, priorizando a estabilidade do app.
     js_script = """
     <script>
-    // Variável para controlar o "debounce"
-    let debounceTimer;
-
-    // Função para remover classes de cor antigas e evitar duplicação
-    const clearOldColors = (element) => {
-        element.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
-    }
-
     const applyColors = () => {
         const markers = document.querySelectorAll('.activity-item-marker');
         const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
 
         if (markers.length === 0 || expanderHeaders.length === 0 || markers.length !== expanderHeaders.length) {
-            // Se não houver elementos ou se a contagem for diferente, não faz nada.
-            // Isso evita erros durante a renderização parcial do Streamlit.
             return;
         }
 
@@ -303,7 +293,8 @@ def main():
             const header = expanderHeaders[index];
             if (!header) return;
 
-            clearOldColors(header);
+            // Limpa classes de cor antigas para evitar duplicação
+            header.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
 
             let colorClass = '';
             if (marker.classList.contains('alert-red')) {
@@ -320,23 +311,27 @@ def main():
         });
     }
 
-    // O MutationObserver é o "vigia" que detecta mudanças na página.
-    const observer = new MutationObserver((mutations, obs) => {
-        // Debounce: Limpa o timer anterior e inicia um novo.
-        // A função applyColors só será chamada 150ms depois da ÚLTIMA mudança detectada.
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(applyColors, 150);
-    });
-
-    // Começa a observar o corpo do documento por mudanças na estrutura (novos elementos, etc.)
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-
-    // Roda uma vez no carregamento inicial, após um pequeno delay
+    // A maneira mais estável de rodar o script:
+    // Espera a página inteira carregar e então, após um pequeno delay para
+    // garantir que o Streamlit terminou de renderizar, aplica as cores.
+    // Isso evita o loop infinito e a sobrecarga que causavam os travamentos.
     window.addEventListener('load', () => {
-        setTimeout(applyColors, 200);
+        // Um componente do Streamlit pode ser renderizado em um iframe,
+        // então criamos um gatilho que tenta aplicar as cores repetidamente
+        // por um curto período após o carregamento, garantindo que os elementos sejam encontrados.
+        const intervalId = setInterval(() => {
+            const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
+            if (expanderHeaders.length > 0) {
+                applyColors();
+                // Uma vez que os expanders foram encontrados e coloridos, paramos o gatilho.
+                clearInterval(intervalId);
+            }
+        }, 200); // Tenta a cada 200ms
+
+        // Como segurança, para o gatilho após alguns segundos para não rodar para sempre.
+        setTimeout(() => {
+            clearInterval(intervalId);
+        }, 3000);
     });
     </script>
     """
