@@ -26,6 +26,7 @@ from sqlalchemy import create_engine, text, exc
 from sqlalchemy.engine import Engine
 from datetime import datetime, timedelta
 from typing import Optional
+import streamlit.components.v1 as components
 
 # --- Chave de Sessão para Login ---
 USERNAME_KEY = "username_distro_app"
@@ -37,12 +38,11 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
-# REVISÃO 3: Simplificando o seletor CSS para ser mais direto e robusto.
-# A lógica agora é: encontrar nosso marcador invisível e estilizar o expander
-# que está dentro do elemento irmão (o container que o Streamlit cria automaticamente).
+# REVISÃO 4: Simplificando o CSS. A lógica de aplicação de cor será feita por JavaScript.
+# O CSS agora apenas define as classes de cor que o script irá adicionar.
 st.markdown("""
 <style>
-    /* O marcador em si é invisível, serve apenas para o seletor CSS. */
+    /* O marcador em si é invisível, serve apenas para o script encontrar. */
     .activity-item-marker {
         display: none;
     }
@@ -52,21 +52,19 @@ st.markdown("""
         margin-bottom: 8px !important;
     }
 
-    /* --- Color Styling for Expander Headers --- */
-    /* Encontra o marcador .alert-red, seleciona o div irmão (+ div),
-       e então encontra e estiliza o cabeçalho do expander dentro dele. */
-    div.alert-red + div [data-testid="stExpander"] > div:first-child {
+    /* --- Classes de Cor que serão aplicadas pelo JavaScript --- */
+    .alert-red-header {
         background-color: #ffcdd2 !important;
     }
 
-    div.alert-black + div [data-testid="stExpander"] > div:first-child {
+    .alert-black-header {
         background-color: #BDBDBD !important;
     }
-    div.alert-black + div [data-testid="stExpander"] p {
+    .alert-black-header p { /* Garante que o texto seja branco no fundo escuro */
         color: white !important;
     }
 
-    div.alert-gray + div [data-testid="stExpander"] > div:first-child {
+    .alert-gray-header {
         background-color: #f5f5f5 !important;
     }
 
@@ -174,7 +172,7 @@ def main():
     
     st.sidebar.info("O filtro de data define o período para buscar o **histórico de contexto** das atividades.")
     data_inicio = st.sidebar.date_input("📅 Início do Histórico", value=data_inicio_padrao)
-    data_fim = st.sidebar.date_input("� Fim do Histórico", value=data_fim_padrao)
+    data_fim = st.sidebar.date_input("📅 Fim do Histórico", value=data_fim_padrao)
 
     if data_inicio > data_fim:
         st.sidebar.error("A data de início não pode ser posterior à data de fim.")
@@ -265,9 +263,6 @@ def main():
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        # REVISÃO 3: Simplificando a renderização. Removemos o container explícito
-        # e confiamos na estrutura padrão do Streamlit.
-        
         # Colocamos o marcador invisível...
         st.markdown(f'<div class="activity-item-marker {classe_css}"></div>', unsafe_allow_html=True)
         
@@ -282,6 +277,62 @@ def main():
                     "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
                     "activity_status": "Status", "Texto": None
                 })
+
+    # --- SCRIPT INJECTION ---
+    # Este script é a solução final. Ele roda após a página carregar, encontra os marcadores
+    # e aplica as classes de cor diretamente nos cabeçalhos dos expanders.
+    js_script = """
+    <script>
+    const applyColors = () => {
+        const markers = document.querySelectorAll('.activity-item-marker');
+
+        markers.forEach(marker => {
+            let colorClass = null;
+            if (marker.classList.contains('alert-red')) {
+                colorClass = 'alert-red-header';
+            } else if (marker.classList.contains('alert-black')) {
+                colorClass = 'alert-black-header';
+            } else if (marker.classList.contains('alert-gray')) {
+                colorClass = 'alert-gray-header';
+            }
+
+            if (colorClass) {
+                // O st.markdown cria um div. O expander está em um div irmão.
+                let currentElement = marker.parentElement;
+                let expanderHeader = null;
+
+                // Procuramos nos próximos elementos irmãos até encontrar o expander
+                while (currentElement.nextElementSibling) {
+                    currentElement = currentElement.nextElementSibling;
+                    expanderHeader = currentElement.querySelector('[data-testid="stExpander"] > div:first-child');
+                    if (expanderHeader) {
+                        // Encontramos! Adicionamos a classe de cor e paramos a busca.
+                        expanderHeader.classList.add(colorClass);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    // O Streamlit pode recarregar partes da página, então precisamos de uma forma
+    // robusta de garantir que nosso script rode quando necessário.
+    // Usar um MutationObserver é mais confiável que um simples timeout.
+    const observer = new MutationObserver((mutations, obs) => {
+        // Roda a função de colorir sempre que a página for alterada.
+        applyColors();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // Roda uma vez no carregamento inicial também.
+    window.addEventListener('load', applyColors);
+    </script>
+    """
+    components.html(js_script, height=0, width=0)
 
 if __name__ == "__main__":
     main()
