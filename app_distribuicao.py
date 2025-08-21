@@ -11,15 +11,13 @@ Funcionalidades Principais:
 - Login de Usuário: Acesso seguro utilizando credenciais armazenadas no
   Streamlit secrets.
 - Visão Focada: Lista todas as atividades com status 'Aberta'.
+- Ordenação Inteligente: Ordena as atividades por responsável e depois por pasta.
+- Destaque Visual: Usa cores para alertar sobre múltiplas atividades abertas
+  na mesma pasta.
 - Contexto Histórico: Para cada atividade aberta, exibe todas as outras
-  atividades (abertas, fechadas, canceladas, etc.) da mesma pasta
-  dentro do período de tempo selecionado.
-- Prevenção de Redistribuição: Ajuda o gestor a ver quem trabalhou
-  recentemente em uma pasta antes de distribuir uma nova atividade,
-  mantendo a consistência.
+  atividades da mesma pasta dentro do período de tempo selecionado.
 - Filtros Inteligentes: Os filtros de responsável, pasta e texto se aplicam
-  apenas às atividades abertas, permitindo encontrar rapidamente
-  o que precisa ser distribuído.
+  apenas às atividades abertas.
 """
 
 import streamlit as st
@@ -38,7 +36,7 @@ st.set_page_config(
     page_title="Apoio à Distribuição de 'Verificar'"
 )
 
-st.title("Apoio à Distribuição de Atividades 'Verificar' Contextual")
+st.title("Apoio à Distribuição de Atividades 'Verificar'")
 
 # --- Conexão com o Banco de Dados ---
 @st.cache_resource
@@ -116,11 +114,9 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
 
 # --- Interface Principal ---
 def main():
-    # Inicializa a chave de usuário na sessão se não existir
     if USERNAME_KEY not in st.session_state:
         st.session_state[USERNAME_KEY] = None
 
-    # --- Lógica de Login ---
     if not st.session_state.get(USERNAME_KEY):
         st.sidebar.header("🔐 Login")
         with st.sidebar.form("login_form"):
@@ -128,7 +124,6 @@ def main():
             password = st.text_input("Senha", type="password")
             submitted = st.form_submit_button("Entrar")
             if submitted:
-                # Valida as credenciais com base no st.secrets
                 creds = st.secrets.get("credentials", {})
                 user_creds = creds.get("usernames", {})
                 if username in user_creds and user_creds[username] == password:
@@ -140,11 +135,9 @@ def main():
         st.info("👋 Bem-vindo! Por favor, faça o login na barra lateral para continuar.")
         st.stop()
 
-    # --- Interface Principal do App (Executa apenas se logado) ---
     st.sidebar.success(f"Logado como: **{st.session_state[USERNAME_KEY]}**")
     st.sidebar.header("🔍 Filtros da Consulta")
 
-    # Filtro de Data para o contexto histórico
     data_fim_padrao = datetime.now().date()
     data_inicio_padrao = data_fim_padrao - timedelta(days=10)
     
@@ -172,13 +165,11 @@ def main():
         st.info("Nenhuma atividade 'Verificar' em aberto foi encontrada ou não há histórico para elas no período selecionado.")
         st.stop()
 
-    # Separa o dataframe principal em dois: um só com as abertas, outro com o histórico completo
     df_abertas = df_contexto_total[df_contexto_total['activity_status'] == 'Aberta'].copy()
     
     st.sidebar.markdown("---")
     st.sidebar.header("🔎 Filtrar Atividades Abertas")
 
-    # Filtros que se aplicam APENAS às atividades abertas
     lista_pastas = sorted(df_abertas['activity_folder'].dropna().unique().tolist())
     pastas_selecionadas = st.sidebar.multiselect("📁 Pastas", options=lista_pastas)
 
@@ -187,7 +178,6 @@ def main():
     
     texto_busca = st.sidebar.text_input("📝 Buscar no Texto")
 
-    # Aplicação dos filtros
     df_abertas_filtrado = df_abertas
     if pastas_selecionadas:
         df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['activity_folder'].isin(pastas_selecionadas)]
@@ -196,24 +186,56 @@ def main():
     if texto_busca:
         df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['Texto'].str.contains(texto_busca, case=False, na=False)]
 
+    # --- Lógica de Destaque e Ordenação ---
+    # Contagem de atividades abertas por pasta
+    contagem_pastas = df_abertas_filtrado['activity_folder'].value_counts()
+    df_abertas_filtrado['alerta_pasta'] = df_abertas_filtrado['activity_folder'].map(contagem_pastas) > 1
+
+    # Ordena por Responsável e depois por Pasta
+    df_abertas_filtrado = df_abertas_filtrado.sort_values(
+        by=['user_profile_name', 'activity_folder', 'activity_date'], 
+        ascending=[True, True, False]
+    )
+
     # --- Exibição dos Resultados ---
     st.metric("Total de Atividades 'Verificar' Abertas (após filtros)", len(df_abertas_filtrado))
+    
+    # Adiciona a legenda de cores
+    st.markdown(
+        """
+        <style>
+            .legenda { display: flex; align-items: center; margin-bottom: 1rem; }
+            .cor-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #ccc; }
+            .vermelho { background-color: #ffcdd2; }
+            .preto { background-color: #f5f5f5; }
+        </style>
+        <div class="legenda">
+            <div class="cor-box vermelho"></div><span><b>Alerta:</b> Mais de uma atividade 'Aberta' na mesma pasta.</span>
+        </div>
+        <div class="legenda">
+            <div class="cor-box preto"></div><span><b>Normal:</b> Apenas uma atividade 'Aberta' na pasta.</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
     st.caption(f"Exibindo atividades abertas e seu histórico de contexto entre {data_inicio.strftime('%d/%m/%Y')} e {data_fim.strftime('%d/%m/%Y')}.")
     st.markdown("---")
-
-    # Ordena as atividades abertas pela data mais recente
-    df_abertas_filtrado = df_abertas_filtrado.sort_values('activity_date', ascending=False)
 
     for _, atividade_aberta in df_abertas_filtrado.iterrows():
         pasta = atividade_aberta['activity_folder']
         
+        cor_header = "color: red;" if atividade_aberta['alerta_pasta'] else "color: black;"
+        
         expander_title = (
+            f"<span style='{cor_header}'>"
             f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | "
             f"Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
             f"Responsável Atual: {atividade_aberta['user_profile_name']}"
+            f"</span>"
         )
 
-        with st.expander(expander_title):
+        with st.expander(expander_title, expanded=False):
             st.subheader("Detalhes da Atividade em Aberto")
             st.text_area(
                 "Conteúdo", 
@@ -225,7 +247,6 @@ def main():
 
             st.subheader(f"Histórico da Pasta '{pasta}' no Período")
             
-            # Filtra o histórico completo para a pasta atual
             df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == pasta]
             
             if df_historico_pasta.empty:
@@ -237,11 +258,11 @@ def main():
                     hide_index=True,
                     column_config={
                         "activity_id": "ID",
-                        "activity_folder": None, # Oculta a coluna da pasta, pois já está no título
+                        "activity_folder": None,
                         "user_profile_name": "Responsável",
                         "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
                         "activity_status": "Status",
-                        "Texto": None # Oculta o texto no histórico para manter a tabela limpa
+                        "Texto": None
                     }
                 )
 
