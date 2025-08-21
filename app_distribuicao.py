@@ -17,7 +17,7 @@ Funcionalidades Principais:
 - Prevenção de Redistribuição: Ajuda o gestor a ver quem trabalhou
   recentemente em uma pasta antes de distribuir uma nova atividade,
   mantendo a consistência.
-- Filtros Inteligentes: Os filtros de responsável e texto se aplicam
+- Filtros Inteligentes: Os filtros de responsável, pasta e texto se aplicam
   apenas às atividades abertas, permitindo encontrar rapidamente
   o que precisa ser distribuído.
 """
@@ -68,9 +68,10 @@ def db_engine_mysql() -> Optional[Engine]:
 @st.cache_data(ttl=300) # Cache de 5 minutos
 def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fim: datetime.date) -> pd.DataFrame:
     """
-    Carrega dados de forma contextual.
+    Carrega dados de forma contextual e corrigida.
     1. Encontra todas as pastas que têm pelo menos uma atividade 'Verificar' aberta.
-    2. Busca todas as atividades 'Verificar' dessas pastas que ocorreram no período de tempo especificado.
+    2. Busca TODAS as atividades 'Abertas' dessas pastas (independente da data).
+    3. Busca as DEMAIS atividades (histórico) dessas pastas que ocorreram no período de tempo especificado.
     """
     if _eng is None:
         return pd.DataFrame()
@@ -94,7 +95,10 @@ def carregar_dados_contextuais(_eng: Engine, data_inicio: datetime.date, data_fi
             PastasComAbertas p ON v.activity_folder = p.activity_folder
         WHERE 
             v.activity_type = 'Verificar' 
-            AND DATE(v.activity_date) BETWEEN :data_inicio AND :data_fim
+            AND (
+                v.activity_status = 'Aberta' OR
+                DATE(v.activity_date) BETWEEN :data_inicio AND :data_fim
+            )
     """)
     try:
         with _eng.connect() as conn:
@@ -175,12 +179,18 @@ def main():
     st.sidebar.header("🔎 Filtrar Atividades Abertas")
 
     # Filtros que se aplicam APENAS às atividades abertas
+    lista_pastas = sorted(df_abertas['activity_folder'].dropna().unique().tolist())
+    pastas_selecionadas = st.sidebar.multiselect("📁 Pastas", options=lista_pastas)
+
     lista_responsaveis = sorted(df_abertas['user_profile_name'].dropna().unique().tolist())
     usuarios_selecionados = st.sidebar.multiselect("👤 Responsáveis", options=lista_responsaveis)
+    
     texto_busca = st.sidebar.text_input("📝 Buscar no Texto")
 
     # Aplicação dos filtros
     df_abertas_filtrado = df_abertas
+    if pastas_selecionadas:
+        df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['activity_folder'].isin(pastas_selecionadas)]
     if usuarios_selecionados:
         df_abertas_filtrado = df_abertas_filtrado[df_abertas_filtrado['user_profile_name'].isin(usuarios_selecionados)]
     if texto_busca:
@@ -198,7 +208,8 @@ def main():
         pasta = atividade_aberta['activity_folder']
         
         expander_title = (
-            f"Pasta: {pasta} | Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
+            f"ID: {atividade_aberta['activity_id']} | Pasta: {pasta} | "
+            f"Aberta em: {atividade_aberta['activity_date'].strftime('%d/%m/%Y %H:%M')} | "
             f"Responsável Atual: {atividade_aberta['user_profile_name']}"
         )
 
