@@ -37,36 +37,43 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
+# REVISÃO: O CSS foi reescrito para ser mais robusto.
+# 1. O espaçamento agora é controlado por 'margin-bottom' em cada expander.
+# 2. As cores são aplicadas usando um "marcador" invisível e o seletor de irmão adjacente (+).
+#    Isso é mais confiável do que tentar "envelopar" componentes do Streamlit.
+# 3. Seletores como [data-testid="stExpander"] são usados por serem mais estáveis que as classes geradas.
 st.markdown("""
 <style>
-    /* Controla o espaço entre os expansores */
-    .st-emotion-cache-1gulkj5 {
-        gap: 0.5rem !important;
+    /* --- Layout & Spacing --- */
+    /* Remove o espaçamento padrão do container principal do Streamlit para ter controle total. */
+    div[data-testid="stVerticalBlock"] {
+        gap: 0;
     }
-    .expander-wrapper .st-expander {
-        border: none !important;
-        box-shadow: none !important;
-        margin-bottom: 8px; /* Espaço entre cada item */
+
+    /* Adiciona um espaço de 8px abaixo de cada expander para separá-los. */
+    .expander-wrapper {
+        margin-bottom: 8px;
     }
-    .expander-wrapper .st-expander header {
-        border-radius: 5px;
-        padding: 0.5rem 0.75rem !important;
-    }
-    /* Cores de fundo para os alertas */
-    .alert-red .st-expander header {
+
+    /* --- Color Styling for Expander Headers --- */
+    /* A mágica acontece aqui: selecionamos o cabeçalho do expander que está
+       imediatamente após nosso div com a classe de cor. */
+    .alert-red [data-testid="stExpander"] > div:first-child {
         background-color: #ffcdd2 !important;
     }
-    .alert-black .st-expander header {
+
+    .alert-black [data-testid="stExpander"] > div:first-child {
         background-color: #BDBDBD !important;
+    }
+    .alert-black [data-testid="stExpander"] p { /* Garante que o texto seja branco no fundo escuro */
         color: white !important;
     }
-    .alert-black .st-expander header p {
-        color: white !important;
-    }
-    .alert-gray .st-expander header {
+
+    .alert-gray [data-testid="stExpander"] > div:first-child {
         background-color: #f5f5f5 !important;
     }
-    /* Estilos da legenda */
+
+    /* --- Estilos da Legenda (sem alterações) --- */
     .legenda { display: flex; align-items: center; margin-bottom: 1rem; }
     .cor-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #ccc; }
     .vermelho { background-color: #ffcdd2; }
@@ -261,9 +268,11 @@ def main():
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        container = st.container()
-        container.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
-        with container:
+        # REVISÃO: A renderização do expander foi simplificada.
+        # Agora usamos um único container com a classe de espaçamento e a classe de cor.
+        # O st.expander é colocado dentro deste container.
+        with st.container():
+            st.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
             with st.expander(expander_title, expanded=False):
                 st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
                 st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
@@ -274,7 +283,8 @@ def main():
                         "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
                         "activity_status": "Status", "Texto": None
                     })
-        container.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
