@@ -277,8 +277,8 @@ def main():
                 })
 
     # --- SCRIPT INJECTION ---
-    # REVISÃO 8: Solução estável e leve, removendo o MutationObserver que causava instabilidade.
-    # O script agora roda apenas uma vez após a página carregar, priorizando a estabilidade do app.
+    # REVISÃO 9: Solução final, estável e segura.
+    # Este script espera a renderização do Streamlit terminar e aplica as cores uma única vez.
     js_script = """
     <script>
     const applyColors = () => {
@@ -293,7 +293,6 @@ def main():
             const header = expanderHeaders[index];
             if (!header) return;
 
-            // Limpa classes de cor antigas para evitar duplicação
             header.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
 
             let colorClass = '';
@@ -311,28 +310,42 @@ def main():
         });
     }
 
-    // A maneira mais estável de rodar o script:
-    // Espera a página inteira carregar e então, após um pequeno delay para
-    // garantir que o Streamlit terminou de renderizar, aplica as cores.
-    // Isso evita o loop infinito e a sobrecarga que causavam os travamentos.
-    window.addEventListener('load', () => {
-        // Um componente do Streamlit pode ser renderizado em um iframe,
-        // então criamos um gatilho que tenta aplicar as cores repetidamente
-        // por um curto período após o carregamento, garantindo que os elementos sejam encontrados.
+    // Função que espera a página estabilizar antes de rodar o script.
+    const runWhenReady = () => {
+        let lastCount = 0;
+        let stableChecks = 0;
         const intervalId = setInterval(() => {
-            const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
-            if (expanderHeaders.length > 0) {
-                applyColors();
-                // Uma vez que os expanders foram encontrados e coloridos, paramos o gatilho.
-                clearInterval(intervalId);
+            const currentCount = document.querySelectorAll('[data-testid="stExpander"]').length;
+            
+            // Se a contagem for a mesma por 3 checagens, consideramos estável.
+            if (currentCount > 0 && currentCount === lastCount) {
+                stableChecks++;
+                if (stableChecks >= 3) {
+                    clearInterval(intervalId);
+                    applyColors();
+                }
+            } else {
+                stableChecks = 0; // Reseta se a contagem mudar
             }
-        }, 200); // Tenta a cada 200ms
+            lastCount = currentCount;
 
-        // Como segurança, para o gatilho após alguns segundos para não rodar para sempre.
-        setTimeout(() => {
-            clearInterval(intervalId);
-        }, 3000);
-    });
+        }, 200); // Checa a cada 200ms
+
+        // Para o processo após 5 segundos como segurança
+        setTimeout(() => clearInterval(intervalId), 5000);
+    };
+
+    // Roda a função principal quando o iframe do Streamlit carregar.
+    window.addEventListener('load', runWhenReady);
+    
+    // Adiciona um gatilho extra para o componente de recarregar dados do Streamlit
+    // Isso garante que as cores sejam reaplicadas após um rerun.
+    const rerunButton = parent.document.querySelector('.stButton button');
+    if (rerunButton) {
+        rerunButton.addEventListener('click', () => {
+            setTimeout(runWhenReady, 500); // Espera um pouco para o rerun começar
+        });
+    }
     </script>
     """
     components.html(js_script, height=0, width=0)
