@@ -38,32 +38,13 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
+# REVISÃO 11: Simplificação radical. Removemos todo o CSS de coloração,
+# pois a formatação será feita diretamente no Python com Markdown.
 st.markdown("""
 <style>
-    /* O marcador em si é invisível, serve apenas para o script encontrar. */
-    .activity-item-marker {
-        display: none;
-    }
-
     /* Adiciona um espaço abaixo de cada expander para separá-los. */
     div[data-testid="stExpander"] {
         margin-bottom: 8px !important;
-    }
-
-    /* --- Classes de Cor que serão aplicadas pelo JavaScript --- */
-    .alert-red-header {
-        background-color: #ffcdd2 !important;
-    }
-
-    .alert-black-header {
-        background-color: #BDBDBD !important;
-    }
-    .alert-black-header p { /* Garante que o texto seja branco no fundo escuro */
-        color: white !important;
-    }
-
-    .alert-gray-header {
-        background-color: #f5f5f5 !important;
     }
 
     /* --- Estilos da Legenda (sem alterações) --- */
@@ -256,15 +237,19 @@ def main():
                 outro = conflitos_df.iloc[0]
                 info_conflito = f" (Conflito com ID {outro['activity_id']} | Resp: {outro['user_profile_name']})"
 
-        expander_title = (
+        # REVISÃO 11: A formatação do título é feita aqui, com Markdown.
+        base_title = (
             f"ID: {atividade_atual['activity_id']} | Pasta: {atividade_atual['activity_folder']} | "
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
+
+        if classe_css == 'alert-red':
+            expander_title = f"❗️ :red[**{base_title}**] ❗️"
+        elif classe_css == 'alert-black':
+            expander_title = f"⚠️ **{base_title}** ⚠️" # Usamos negrito para destaque, cor preta é o padrão.
+        else: # alert-gray
+            expander_title = base_title
         
-        # Colocamos o marcador invisível...
-        st.markdown(f'<div class="activity-item-marker {classe_css}"></div>', unsafe_allow_html=True)
-        
-        # ...e o expander logo em seguida.
         with st.expander(expander_title, expanded=False):
             st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
             st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
@@ -275,64 +260,6 @@ def main():
                     "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
                     "activity_status": "Status", "Texto": None
                 })
-
-    # --- SCRIPT INJECTION ---
-    # REVISÃO 10: Solução final, estável e segura.
-    # Este script espera a renderização do Streamlit terminar e aplica as cores uma única vez.
-    js_script = """
-    <script>
-    const applyColors = () => {
-        const markers = document.querySelectorAll('.activity-item-marker');
-        const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
-
-        if (markers.length === 0 || expanderHeaders.length === 0 || markers.length !== expanderHeaders.length) {
-            return false; // Indica que não foi bem-sucedido
-        }
-
-        markers.forEach((marker, index) => {
-            const header = expanderHeaders[index];
-            if (!header) return;
-
-            header.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
-
-            let colorClass = '';
-            if (marker.classList.contains('alert-red')) {
-                colorClass = 'alert-red-header';
-            } else if (marker.classList.contains('alert-black')) {
-                colorClass = 'alert-black-header';
-            } else if (marker.classList.contains('alert-gray')) {
-                colorClass = 'alert-gray-header';
-            }
-            
-            if (colorClass) {
-                header.classList.add(colorClass);
-            }
-        });
-        return true; // Indica que foi bem-sucedido
-    }
-
-    // A abordagem mais segura: um verificador que tenta aplicar as cores
-    // e para assim que consegue, evitando sobrecarga.
-    const runWhenReady = () => {
-        const intervalId = setInterval(() => {
-            // Tenta aplicar as cores. Se for bem-sucedido, a função retorna true.
-            if (applyColors()) {
-                // Para o verificador assim que as cores forem aplicadas.
-                clearInterval(intervalId);
-            }
-        }, 250); // Tenta a cada 250ms
-
-        // Como segurança, para o verificador após 5 segundos, independentemente do resultado.
-        setTimeout(() => {
-            clearInterval(intervalId);
-        }, 5000);
-    };
-
-    // Roda a função principal quando o iframe do Streamlit carregar.
-    window.addEventListener('load', runWhenReady);
-    </script>
-    """
-    components.html(js_script, height=0, width=0)
 
 if __name__ == "__main__":
     main()
