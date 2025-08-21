@@ -38,8 +38,6 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
-# REVISÃO 4: Simplificando o CSS. A lógica de aplicação de cor será feita por JavaScript.
-# O CSS agora apenas define as classes de cor que o script irá adicionar.
 st.markdown("""
 <style>
     /* O marcador em si é invisível, serve apenas para o script encontrar. */
@@ -279,15 +277,42 @@ def main():
                 })
 
     # --- SCRIPT INJECTION ---
-    # Este script é a solução final. Ele roda após a página carregar, encontra os marcadores
-    # e aplica as classes de cor diretamente nos cabeçalhos dos expanders.
+    # REVISÃO 6: Adicionando logs de depuração para o console do navegador.
+    # Isso nos ajudará a diagnosticar o problema diretamente no Streamlit Cloud.
     js_script = """
     <script>
-    const applyColors = () => {
-        const markers = document.querySelectorAll('.activity-item-marker');
+    // Função para remover classes de cor antigas e evitar duplicação
+    const clearOldColors = (element) => {
+        element.classList.remove('alert-red-header', 'alert-black-header', 'alert-gray-header');
+    }
 
-        markers.forEach(marker => {
-            let colorClass = null;
+    const applyColorsWithLogs = () => {
+        console.log("--- [DEBUG] Tentando aplicar cores... ---");
+
+        const markers = document.querySelectorAll('.activity-item-marker');
+        const expanderHeaders = document.querySelectorAll('[data-testid="stExpander"] > div:first-child');
+
+        console.log(`[DEBUG] Encontrados ${markers.length} marcadores e ${expanderHeaders.length} cabeçalhos de expander.`);
+
+        if (markers.length === 0 || expanderHeaders.length === 0) {
+            console.warn("[DEBUG] Nenhum marcador ou expander encontrado. O script não pode continuar.");
+            return;
+        }
+
+        if (markers.length !== expanderHeaders.length) {
+            console.error("[DEBUG] ERRO: O número de marcadores é diferente do número de expanders. O mapeamento pode falhar.");
+        }
+
+        markers.forEach((marker, index) => {
+            const header = expanderHeaders[index];
+            if (!header) {
+                console.warn(`[DEBUG] Não foi encontrado um cabeçalho para o marcador de índice ${index}.`);
+                return;
+            }
+
+            clearOldColors(header);
+
+            let colorClass = '';
             if (marker.classList.contains('alert-red')) {
                 colorClass = 'alert-red-header';
             } else if (marker.classList.contains('alert-black')) {
@@ -295,41 +320,25 @@ def main():
             } else if (marker.classList.contains('alert-gray')) {
                 colorClass = 'alert-gray-header';
             }
-
+            
             if (colorClass) {
-                // O st.markdown cria um div. O expander está em um div irmão.
-                let currentElement = marker.parentElement;
-                let expanderHeader = null;
-
-                // Procuramos nos próximos elementos irmãos até encontrar o expander
-                while (currentElement.nextElementSibling) {
-                    currentElement = currentElement.nextElementSibling;
-                    expanderHeader = currentElement.querySelector('[data-testid="stExpander"] > div:first-child');
-                    if (expanderHeader) {
-                        // Encontramos! Adicionamos a classe de cor e paramos a busca.
-                        expanderHeader.classList.add(colorClass);
-                        break;
-                    }
-                }
+                header.classList.add(colorClass);
             }
         });
+
+        console.log("--- [DEBUG] Processo de coloração finalizado. ---");
     }
 
-    // O Streamlit pode recarregar partes da página, então precisamos de uma forma
-    // robusta de garantir que nosso script rode quando necessário.
-    // Usar um MutationObserver é mais confiável que um simples timeout.
-    const observer = new MutationObserver((mutations, obs) => {
-        // Roda a função de colorir sempre que a página for alterada.
-        applyColors();
-    });
+    // Usamos um simples setInterval em vez de MutationObserver para maior compatibilidade.
+    // Ele tentará aplicar as cores a cada 250ms, o que deve ser suficiente para
+    // capturar os elementos após serem renderizados pelo Streamlit.
+    // A função `clearOldColors` garante que não vamos adicionar classes duplicadas.
+    setInterval(applyColorsWithLogs, 250);
 
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
+    // Roda uma vez no carregamento inicial também
+    window.addEventListener('load', () => {
+        setTimeout(applyColorsWithLogs, 500); // Um delay maior no carregamento inicial
     });
-    
-    // Roda uma vez no carregamento inicial também.
-    window.addEventListener('load', applyColors);
     </script>
     """
     components.html(js_script, height=0, width=0)
