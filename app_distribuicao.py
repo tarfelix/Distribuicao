@@ -37,39 +37,38 @@ st.set_page_config(
 )
 
 # --- CSS Customizado para Cores de Fundo e Layout Compacto ---
-# REVISÃO: O CSS foi reescrito para ser mais robusto.
-# 1. O espaçamento agora é controlado por 'margin-bottom' em cada expander.
-# 2. As cores são aplicadas usando um "marcador" invisível e o seletor de irmão adjacente (+).
-#    Isso é mais confiável do que tentar "envelopar" componentes do Streamlit.
-# 3. Seletores como [data-testid="stExpander"] são usados por serem mais estáveis que as classes geradas.
+# REVISÃO 2: Adotando uma abordagem mais robusta com o seletor CSS :has().
+# 1. Cada item (expander) é colocado em seu próprio st.container().
+# 2. Um 'marcador' div invisível com a classe de cor é colocado dentro do container.
+# 3. O CSS usa :has() para encontrar o container que tem o marcador e estilizar o expander dentro dele.
+#    Ex: div:has(.alert-red) -> Encontra o container que contém a classe .alert-red.
 st.markdown("""
 <style>
     /* --- Layout & Spacing --- */
-    /* Remove o espaçamento padrão do container principal do Streamlit para ter controle total. */
-    div[data-testid="stVerticalBlock"] {
-        gap: 0;
-    }
-
-    /* Adiciona um espaço de 8px abaixo de cada expander para separá-los. */
-    .expander-wrapper {
+    /* Adiciona um espaço abaixo de cada container de atividade para separá-los. */
+    div[data-testid="stContainer"]:has(div.activity-item-marker) {
         margin-bottom: 8px;
     }
 
-    /* --- Color Styling for Expander Headers --- */
-    /* A mágica acontece aqui: selecionamos o cabeçalho do expander que está
-       imediatamente após nosso div com a classe de cor. */
-    .alert-red [data-testid="stExpander"] > div:first-child {
+    /* O marcador em si é invisível, serve apenas para o seletor CSS. */
+    .activity-item-marker {
+        display: none;
+    }
+
+    /* --- Color Styling for Expander Headers using :has() --- */
+    /* Seleciona o container que TEM um marcador .alert-red e estiliza o expander DENTRO dele. */
+    div[data-testid="stContainer"]:has(div.alert-red) [data-testid="stExpander"] > div:first-child {
         background-color: #ffcdd2 !important;
     }
 
-    .alert-black [data-testid="stExpander"] > div:first-child {
+    div[data-testid="stContainer"]:has(div.alert-black) [data-testid="stExpander"] > div:first-child {
         background-color: #BDBDBD !important;
     }
-    .alert-black [data-testid="stExpander"] p { /* Garante que o texto seja branco no fundo escuro */
+    div[data-testid="stContainer"]:has(div.alert-black) [data-testid="stExpander"] p {
         color: white !important;
     }
 
-    .alert-gray [data-testid="stExpander"] > div:first-child {
+    div[data-testid="stContainer"]:has(div.alert-gray) [data-testid="stExpander"] > div:first-child {
         background-color: #f5f5f5 !important;
     }
 
@@ -268,23 +267,21 @@ def main():
             f"Responsável: {atividade_atual['user_profile_name']} | Status: {atividade_atual['activity_status']}{info_conflito}"
         )
         
-        # REVISÃO: A renderização do expander foi simplificada.
-        # Agora usamos um único container com a classe de espaçamento e a classe de cor.
-        # O st.expander é colocado dentro deste container.
-        with st.container():
-            st.markdown(f'<div class="expander-wrapper {classe_css}">', unsafe_allow_html=True)
-            with st.expander(expander_title, expanded=False):
-                st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
-                st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
-                df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
-                st.dataframe(df_historico_pasta, use_container_width=True, hide_index=True,
-                    column_config={
-                        "activity_id": "ID", "activity_folder": None, "user_profile_name": "Responsável",
-                        "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
-                        "activity_status": "Status", "Texto": None
-                    })
-            st.markdown('</div>', unsafe_allow_html=True)
-
+        # REVISÃO 2: A renderização agora cria um container para cada item.
+        item_container = st.container()
+        
+        # Colocamos o marcador invisível e o expander dentro do mesmo container.
+        item_container.markdown(f'<div class="activity-item-marker {classe_css}"></div>', unsafe_allow_html=True)
+        with item_container.expander(expander_title, expanded=False):
+            st.text_area("Conteúdo", atividade_atual['Texto'], key=f"texto_{atividade_atual['activity_id']}", height=150, disabled=True)
+            st.subheader(f"Histórico da Pasta '{atividade_atual['activity_folder']}' no Período")
+            df_historico_pasta = df_contexto_total[df_contexto_total['activity_folder'] == atividade_atual['activity_folder']]
+            st.dataframe(df_historico_pasta, use_container_width=True, hide_index=True,
+                column_config={
+                    "activity_id": "ID", "activity_folder": None, "user_profile_name": "Responsável",
+                    "activity_date": st.column_config.DatetimeColumn("Data", format="DD/MM/YYYY HH:mm"),
+                    "activity_status": "Status", "Texto": None
+                })
 
 if __name__ == "__main__":
     main()
